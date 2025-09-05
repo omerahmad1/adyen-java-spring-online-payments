@@ -1,3 +1,5 @@
+// File: SubscriptionResource.java
+
 package com.adyen.checkout.api;
 
 import com.adyen.Client;
@@ -17,30 +19,25 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.UUID;
 
-/**
- * REST controller for using Adyen checkout API
- */
+import static com.adyen.model.checkout.CreateCheckoutSessionRequest.ShopperInteractionEnum.ECOMMERCE;
+
 @RestController
 @RequestMapping("/api")
 public class SubscriptionResource {
     private final Logger log = LoggerFactory.getLogger(SubscriptionResource.class);
-
-    private final ApplicationProperty applicationProperty;
-
     private final PaymentsApi paymentsApi;
+    private final ApplicationProperty applicationProperty;
 
     @Autowired
     public SubscriptionResource(ApplicationProperty applicationProperty) {
-
         this.applicationProperty = applicationProperty;
-
-        if(applicationProperty.getApiKey() == null) {
+        if (applicationProperty.getApiKey() == null) {
             log.warn("ADYEN_KEY is UNDEFINED");
             throw new RuntimeException("ADYEN_KEY is UNDEFINED");
         }
-        
         var client = new Client(applicationProperty.getApiKey(), Environment.TEST);
         this.paymentsApi = new PaymentsApi(client);
     }
@@ -48,24 +45,47 @@ public class SubscriptionResource {
     @PostMapping("/tokenization/sessions")
     public ResponseEntity<CreateCheckoutSessionResponse> sessions(@RequestHeader String host, HttpServletRequest request) throws IOException, ApiException {
         var orderRef = UUID.randomUUID().toString();
-        var amount = new Amount()
-            .currency("EUR")
-            .value(0L); // zero-auth transaction
+        var amount = new Amount().currency("EUR").value(2000L);
 
         var checkoutSession = new CreateCheckoutSessionRequest();
+//        checkoutSession.setAmount(amount);
+//        checkoutSession.countryCode("NL");
+//        checkoutSession.merchantAccount(this.applicationProperty.getMerchantAccount());
+//        checkoutSession.setReference(orderRef); // required
+//        checkoutSession.setShopperReference(Storage.SHOPPER_REFERENCE); // required
+//        checkoutSession.setChannel(CreateCheckoutSessionRequest.ChannelEnum.WEB);
+//        checkoutSession.setReturnUrl(request.getScheme() + "://" + host + "/redirect?orderRef=" + orderRef);
+//        // recurring payment settings
+//        checkoutSession.setShopperInteraction(CreateCheckoutSessionRequest.ShopperInteractionEnum.ECOMMERCE);
+//        checkoutSession.setRecurringProcessingModel(CreateCheckoutSessionRequest.RecurringProcessingModelEnum.SUBSCRIPTION);
+//        checkoutSession.setEnableRecurring(false);
+//        checkoutSession.captureDelayHours(0);
+//        checkoutSession.authenticationData(AuthenticationData.fromJson("\"Always\""));
+
+        // --- Basic Details ---
         checkoutSession.setAmount(amount);
-        checkoutSession.countryCode("NL");
-        checkoutSession.merchantAccount(this.applicationProperty.getMerchantAccount());
-        checkoutSession.setReference(orderRef); // required
-        checkoutSession.setShopperReference(Storage.SHOPPER_REFERENCE); // required
+        checkoutSession.setReference(orderRef);
+        checkoutSession.setCountryCode("NL");
         checkoutSession.setChannel(CreateCheckoutSessionRequest.ChannelEnum.WEB);
         checkoutSession.setReturnUrl(request.getScheme() + "://" + host + "/redirect?orderRef=" + orderRef);
-        // recurring payment settings
-        checkoutSession.setShopperInteraction(CreateCheckoutSessionRequest.ShopperInteractionEnum.ECOMMERCE);
-        checkoutSession.setRecurringProcessingModel(CreateCheckoutSessionRequest.RecurringProcessingModelEnum.SUBSCRIPTION);
-        checkoutSession.setEnableRecurring(true);
 
-        log.info("/tokenization/sessions {}", checkoutSession);
+        // --- Use your E-commerce Account ---
+        checkoutSession.setMerchantAccount(this.applicationProperty.getMerchantAccount());
+
+        // --- One-Time Payment Settings ---
+        checkoutSession.setShopperInteraction(ECOMMERCE);
+        checkoutSession.setShopperReference(Storage.SHOPPER_REFERENCE + orderRef);
+
+        // --- Correct Manual Capture Setting ---
+        // REMOVED all confusing recurring and captureDelayHours parameters.
+        // This is the correct way to request a reserve-only payment.
+        var additionalData = new HashMap<String, String>();
+        additionalData.put("manualCapture", "true"); // <-- Tells Adyen to ONLY authorize the payment
+        checkoutSession.setAdditionalData(additionalData);
+        checkoutSession.setStorePaymentMethod(false);
+//        checkoutSession.setRecurringProcessingModel(CreateCheckoutSessionRequest.RecurringProcessingModelEnum.SUBSCRIPTION);
+
+        log.info("Creating session for one-time manual capture: {}", checkoutSession);
         var response = paymentsApi.sessions(checkoutSession);
         return ResponseEntity.ok().body(response);
     }
